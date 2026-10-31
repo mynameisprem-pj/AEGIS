@@ -1,31 +1,3 @@
-`docs/AEGIS_MATHEMATICAL_PAPER.tex` (27 KB) is saved and ready. *(Tip: If you want to export a compiled `.pdf` of the paper to attach to your Devpost submission or GitHub repo, you can upload `docs/AEGIS_MATHEMATICAL_PAPER.tex` directly into Overleaf for instant one-click PDF compilation).*
-
-Now let's complete **Phase 12 — Final Hackathon Preparation**. To keep this clean and actionable, we will create:
-
-1. **`README.md`:** A flagship GitHub repository README featuring an ASCII system architecture diagram, mathematical summary, installation & reproducible test commands, CLI usage examples, and explicit separation of established primitives vs. AEGIS's original engineering contributions.
-2. **`scripts/demo.sh`:** An executable, self-contained terminal demonstration script that walks through key generation, $(3,5)$ splitting, ChaCha20-Poly1305 encryption with AAD, zero-exposure threshold decryption, and adversarial tamper rejection (for your live hackathon video recording).
-3. **`docs/HACKATHON_SUBMISSION.md`:** Your complete Devpost submission writeup and a minute-by-minute Demo Video Voiceover Script aligned to the 4 judging criteria (**Cryptanalysis**, **Uniqueness**, **Attack Surface**, and **Mathematical Presentation**).
-
----
-
-## PHASE 12 — Final Hackathon Packaging (`README.md`, `scripts/demo.sh`, `docs/HACKATHON_SUBMISSION.md`)
-
-### 1. Exact Terminal Commands
-
-Create the `scripts` directory and the files in your `/workspaces/AEGIS` terminal:
-
-```bash
-mkdir -p scripts docs
-touch README.md scripts/demo.sh docs/HACKATHON_SUBMISSION.md
-chmod +x scripts/demo.sh
-
-```
-
-### 2. File 1: `README.md`
-
-Write the following documentation into `/workspaces/AEGIS/README.md`:
-
-```markdown
 # AEGIS — Adaptive Encryption and Guarded Integrated Secret-Key System
 
 [![Language: Rust](https://img.shields.io/badge/Language-Rust%202021-orange.svg)](https://www.rust-lang.org/)
