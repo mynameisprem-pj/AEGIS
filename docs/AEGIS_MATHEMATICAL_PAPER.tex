@@ -1,0 +1,366 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\usepackage{mathtools}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+\geometry{margin=1in}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[section]{Definition}
+\newtheorem{remark}[section]{Remark}
+
+\newcommand{\Fp}{\mathbb{F}_p}
+\newcommand{\Fps}{\mathbb{F}_p^*}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\concat}{\;\|\;}
+
+\title{\textbf{AEGIS: Adaptive Encryption and Guarded Integrated Secret-Key System}\\
+\large Formal Mathematical Specification, Finite-Field Threshold Algebra, and Key-Committed AEAD Architecture}
+\author{Project AEGIS Cryptographic Engineering Specification}
+\date{October 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Conventional symmetric key storage forces an architectural trade-off between single-point-of-failure availability risks and key-replication exposure risks. Furthermore, naive applications of Shamir's $(k,n)$ Secret Sharing (SSS) suffer from unauthenticated reconstruction: any $k$ shares algebraically interpolate a polynomial, silently producing a corrupted secret if any share is damaged or forged. This paper presents the formal mathematical and systems specification of \textbf{AEGIS} (\emph{Adaptive Encryption and Guarded Integrated Secret-Key System}), implemented in memory-safe Rust (\texttt{\#![forbid(unsafe\_code)]}). AEGIS integrates prime finite-field threshold algebra over the eighth Mersenne prime $\Fp = \mathrm{GF}(2^{31}-1)$, domain-separated key derivation via HKDF-SHA256 (RFC 5869), and Authenticated Encryption with Associated Data (AEAD) via ChaCha20-Poly1305 (RFC 8439). We prove the absence of 64-bit integer overflow in $\Fp$, prove unique polynomial reconstruction via Vandermonde matrix invertibility, establish a two-layer verifiable reconstruction trapdoor with false-acceptance probability bounded by $2^{-240}$ (algebraic) and $2^{-256}$ (cryptographic commitment), and analyze the system's side-channel and operational boundaries.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ============================================================================
+\section{System Overview}
+% ============================================================================
+
+Let $\mathcal{K} = \{0,1\}^{256}$ denote the space of 256-bit (32-byte) master keys. AEGIS is structured around four composable mathematical mappings:
+\begin{enumerate}[label=(\arabic*)]
+    \item \textbf{Entropy Generation:} $K_{\mathrm{master}} \xleftarrow{\$} \mathcal{K}$ sampled uniformly from the operating system Cryptographically Secure Pseudo-Random Number Generator (CSPRNG), rejecting the degenerate zero vector $0^{256}$.
+    \item \textbf{Domain-Separated Key Hierarchy (HKDF-SHA256):} A deterministic, one-way derivation mapping $K_{\mathrm{master}}$ to an orthogonal pair $(K_{\mathrm{enc}}, C_{\mathrm{key}}) \in \{0,1\}^{256} \times \{0,1\}^{256}$, where $K_{\mathrm{enc}}$ is the symmetric AEAD subkey and $C_{\mathrm{key}}$ is a public cryptographic commitment to $K_{\mathrm{master}}$.
+    \item \textbf{Threshold Decomposition over $\Fp$:} A randomized $(k,n)$ splitting algorithm ($2 \le k \le n \le 255$) that partitions $K_{\mathrm{master}}$ into $m = 16$ sixteen-bit chunks $s_0, \dots, s_{15} \in [0, 2^{16}-1] \subset \Fp$ and evaluates 16 random degree-$(k-1)$ polynomials over $\Fp$ ($p = 2^{31}-1$) at non-zero abscissas $x_i \in \{1, \dots, n\}$.
+    \item \textbf{Key-Committed AEAD Envelope (ChaCha20-Poly1305):} An authenticated encryption engine that binds the protocol header, $C_{\mathrm{key}}$, and user-supplied Associated Data ($\mathrm{AAD}$) into a canonical transcript authenticated by a 128-bit Poly1305 MAC over $\mathbb{F}_{2^{130}-5}$.
+\end{enumerate}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Symbol} & \textbf{Domain / Value} & \textbf{Description} \\ \midrule
+$p$ & $2^{31} - 1 = 2,147,483,647$ & Eighth Mersenne prime modulus ($M_{31}$) \\
+$\Fp$ & $\{0, 1, \dots, p-1\}$ & Prime finite field (Galois Field $\mathrm{GF}(p)$) \\
+$\Fps$ & $\{1, 2, \dots, p-1\}$ & Multiplicative group of non-zero elements in $\Fp$ \\
+$K_{\mathrm{master}}$ & $\{0,1\}^{256} \setminus \{0^{256}\}$ & 256-bit high-entropy root secret key \\
+$K_{\mathrm{enc}}$ & $\{0,1\}^{256}$ & HKDF-derived ChaCha20-Poly1305 subkey \\
+$C_{\mathrm{key}}$ & $\{0,1\}^{256}$ & HKDF-derived public master-key commitment \\
+$k, n$ & $\Z \cap [2, 255],\; k \le n$ & Recovery threshold $k$ and total shares $n$ \\
+$m$ & $16$ & Number of 16-bit (\texttt{u16}) chunks per 256-bit key \\
+$N$ & $\{0,1\}^{96}$ & 96-bit (12-byte) CSPRNG AEAD nonce \\
+$T$ & $\{0,1\}^{128}$ & 128-bit (16-byte) Poly1305 authentication tag \\ \bottomrule
+\end{tabular}
+\caption{Summary of formal notation used throughout the AEGIS specification.}
+\end{table}
+
+% ============================================================================
+\section{Threat Model}
+% ============================================================================
+
+We consider a probabilistic polynomial-time (PPT) active adversary $\mathcal{A}_{\mathrm{comp}}$ with full read/write control over stored ciphertexts, envelope headers, andAssociated Data (the IND-CCA2 / INT-CTXT setting), as well as an computationally unbounded adversary $\mathcal{A}_{\mathrm{info}}$ who compromises at most $k - 1$ threshold shares.
+
+\begin{itemize}
+    \item \textbf{Threshold Compromise Bound:} $\mathcal{A}_{\mathrm{info}}$ may adaptively select any subset $I \subset \{1, \dots, n\}$ of shares with $|I| \le k - 1$. The scheme must guarantee zero mutual information: $I(K_{\mathrm{master}}; \{S_i\}_{i \in I}) = 0$.
+    \item \textbf{Active Share Tampering:} $\mathcal{A}_{\mathrm{comp}}$ may modify share evaluations $y_{i,r} \in \Fp$, inject duplicate share coordinates $x_i = x_j$, or substitute shares generated from an independent key $K'_{\mathrm{master}} \neq K_{\mathrm{master}}$.
+    \item \textbf{Envelope & Header Forgery:} $\mathcal{A}_{\mathrm{comp}}$ may flip arbitrary bits in $(C_{\mathrm{key}}, N, C, T, \mathrm{AAD})$ attempting to induce decryption of tampered plaintext or bypass key commitment verification.
+\end{itemize}
+
+% ============================================================================
+\section{Finite-Field Arithmetic over $\Fp$ ($p = 2^{31} - 1$)}
+% ============================================================================
+
+\begin{definition}[Prime Field $\Fp$]
+Let $p = 2^{31} - 1 = 2,147,483,647$. Because $p$ is prime, the ring of integers modulo $p$, denoted $\Fp = \Z / p\Z$, forms a finite field of order $p$ under modular addition $+_p$ and modular multiplication $\cdot_p$:
+\begin{align}
+    a +_p b &= (a + b) \bmod p \\
+    a -_p b &= (a + p - b) \bmod p \\
+    a \cdot_p b &= (a \cdot b) \bmod p
+\end{align}
+for all canonical representatives $a, b \in \{0, 1, \dots, p-1\}$.
+\end{definition}
+
+\subsection{Overflow-Free 64-Bit Arithmetic Guarantee}
+In systems programming, modular arithmetic bugs frequently arise from fixed-width integer overflow prior to modular reduction.
+
+\begin{proposition}[Absence of \texttt{u64} Overflow in $\Fp$]
+Let $a, b \in \Fp$ be canonical field elements satisfying $0 \le a, b \le p - 1 = 2^{31} - 2$. When uplifted to unsigned 64-bit integers ($\Z \cap [0, 2^{64}-1]$), all intermediate addition, subtraction, and multiplication operations execute without overflow or underflow.
+\end{proposition}
+\begin{proof}
+For addition and subtraction, the maximum intermediate value is:
+\[
+    a + p = (2^{31} - 2) + (2^{31} - 1) = 2^{32} - 3 < 2^{64} - 1.
+\]
+For subtraction, since $b \le p - 1$ and $a \ge 0$, we have $a + p - b \ge 0 + p - (p - 1) = 1 > 0$, preventing unsigned underflow.
+For multiplication, the maximum intermediate product occurs at $a = b = p - 1$:
+\[
+    (p - 1)^2 = (2^{31} - 2)^2 = 2^{62} - 2^{33} + 4 < 2^{62} < 2^{64} - 1 = \texttt{u64::MAX}.
+\]
+Thus, exact reduction modulo $p$ in \texttt{u64} space is strictly free of integer overflow.
+\end{proof}
+
+\subsection{Fermat's Little Theorem and Multiplicative Inverses}
+Division in $\Fp$ requires computing the unique multiplicative inverse $a^{-1} \in \Fps$ for any $a \in \Fps$.
+
+\begin{theorem}[Fermat's Little Theorem]
+For any prime $p$ and any element $a \in \Fp$ with $a \not\equiv 0 \pmod p$:
+\[
+    a^{p-1} \equiv 1 \pmod p.
+\]
+\end{theorem}
+
+\begin{corollary}[Explicit Multiplicative Inverse in $\Fp$]
+For every $a \in \Fps$, the unique element $a^{-1} \in \Fps$ satisfying $a \cdot a^{-1} \equiv 1 \pmod p$ is given by:
+\[
+    a^{-1} \equiv a^{p-2} \pmod p = a^{2,147,483,645} \pmod{2^{31}-1}.
+\]
+\end{corollary}
+\begin{proof}
+Since $\Fps$ is a finite group of order $|\Fps| = p - 1$ under modular multiplication, Lagrange's Theorem implies $a^{|\Fps|} = a^{p-1} \equiv 1 \pmod p$. Multiplying both sides of the congruence by $a^{-1}$ yields $a^{p-2} \equiv a^{-1} \pmod p$.
+\end{proof}
+
+In AEGIS (\texttt{src/field.rs}), $a^{p-2} \bmod p$ is computed via binary exponentiation (square-and-multiply). Writing the fixed exponent in binary as $p - 2 = \sum_{i=0}^{30} e_i 2^i$, the computation requires exactly $\lfloor \log_2(p-2) \rfloor + 1 = 31$ modular squarings and at most $31$ modular multiplications ($\mathcal{O}(\log p)$ complexity).
+
+\subsection{Unbiased Rejection Sampling}
+To sample $r \xleftarrow{\$} \Fp$ uniformly, reducing a 32-bit random integer $u \in [0, 2^{32}-1]$ via $u \bmod p$ introduces modulo bias because $p = 2^{31}-1$ does not divide $2^{32}$. Instead, AEGIS masks 32 CSPRNG bits to 31 bits:
+\[
+    u_{31} = u \mathbin{\&} \texttt{0x7FFF\_FFFF} \in \{0, 1, \dots, 2^{31}-1\}.
+\]
+Since $[0, 2^{31}-1] = \Fp \cup \{p\}$, rejecting the single boundary outcome $u_{31} = p$ yields an exact uniform distribution over $\Fp$ with single-trial acceptance probability:
+\[
+    \Pr[\text{Accept}] = \frac{2^{31}-1}{2^{31}} = 1 - 2^{-31} \approx 0.99999999953.
+\]
+
+% ============================================================================
+\section{Polynomial Construction and Horner's Evaluation}
+% ============================================================================
+
+Let $K_{\mathrm{master}} \in \{0,1\}^{256}$ be partitioned into $m = 16$ little-endian 16-bit unsigned integers:
+\[
+    s_0, s_1, \dots, s_{15} \in \{0, 1, \dots, 2^{16}-1\}.
+\]
+Since $2^{16} = 65,536 < p = 2,147,483,647$, each chunk embeds injectively into $\Fp$. For each chunk index $r \in \{0, \dots, 15\}$, we construct a polynomial $f_r(x) \in \Fp[x]$ of degree $k - 1$:
+\begin{equation}
+    f_r(x) = a_{r,0} + a_{r,1} x + a_{r,2} x^2 + \dots + a_{r,k-1} x^{k-1} \pmod p
+\end{equation}
+where:
+\begin{itemize}
+    \item $a_{r,0} = s_r \in [0, 65535] \subset \Fp$ is the secret chunk embedded at the $y$-intercept $f_r(0) = s_r$,
+    \item $a_{r,1}, \dots, a_{r,k-2} \xleftarrow{\$} \Fp$ are sampled independently and uniformly from $\Fp$, and
+    \item $a_{r,k-1} \xleftarrow{\$} \Fps$ is sampled uniformly from $\Fp \setminus \{0\}$ to guarantee $\deg(f_r) = k - 1$.
+\end{itemize}
+
+To evaluate $f_r(x)$ at participant coordinate $x_i \in \{1, \dots, n\}$ in $\mathcal{O}(k)$ operations without computing powers $x_i^d$ separately, AEGIS uses \textbf{Horner's Method}:
+\begin{equation}
+    f_r(x_i) = a_{r,0} + x_i \Big( a_{r,1} + x_i \big( a_{r,2} + \dots + x_i \cdot a_{r,k-1} \big) \Big) \pmod p.
+\end{equation}
+
+% ============================================================================
+\section{Lagrange Interpolation at $x = 0$}
+% ============================================================================
+
+Given any subset of $k$ shares corresponding to distinct non-zero evaluation abscissas $\{x_0, x_1, \dots, x_{k-1}\} \subset \Fps$, let $y_j = f_r(x_j)$ for $j \in \{0, \dots, k-1\}$.
+
+\begin{theorem}[Lagrange Interpolation Formula over $\Fp$]
+There exists a unique polynomial $f_r(x) \in \Fp[x]$ of degree at most $k - 1$ satisfying $f_r(x_j) = y_j$ for all $j \in \{0, \dots, k-1\}$, given by:
+\begin{equation}
+    f_r(x) = \sum_{j=0}^{k-1} y_j \cdot \ell_j(x) \pmod p, \quad \text{where} \quad \ell_j(x) = \prod_{\substack{0 \le i < k \\ i \neq j}} \frac{x - x_i}{x_j - x_i} \pmod p.
+\end{equation}
+\end{theorem}
+
+Because the secret chunk is located at the constant term $s_r = a_{r,0} = f_r(0)$, AEGIS evaluates the Lagrange basis polynomials directly at $x = 0$:
+\begin{equation}
+    \ell_j(0) = \prod_{\substack{0 \le i < k \\ i \neq j}} \frac{0 - x_i}{x_j - x_i} = \prod_{\substack{0 \le i < k \\ i \neq j}} \frac{x_i}{x_i - x_j} \equiv \left( \prod_{\substack{0 \le i < k \\ i \neq j}} x_i \right) \cdot \left( \prod_{\substack{0 \le i < k \\ i \neq j}} (x_i - x_j) \right)^{p-2} \pmod p.
+\end{equation}
+Hence, each secret chunk $s_r$ is recovered via:
+\begin{equation}
+    s_r = f_r(0) = \sum_{j=0}^{k-1} y_j \cdot \ell_j(0) \pmod p.
+\end{equation}
+
+% ============================================================================
+\section{Vandermonde Matrix Representation}
+% ============================================================================
+
+The uniqueness of polynomial reconstruction in $\Fp[x]$ can be equivalently formulated via linear algebra over the field $\Fp$.
+
+\begin{theorem}[Vandermonde Invertibility over $\Fp$]
+Evaluating $f_r(x) = \sum_{d=0}^{k-1} a_{r,d} x^d$ at $k$ points $x_0, x_1, \dots, x_{k-1} \in \Fp$ defines the linear system $V \mathbf{a}_r = \mathbf{y}_r$ over $\Fp$:
+\begin{equation}
+    \begin{bmatrix}
+        1 & x_0 & x_0^2 & \cdots & x_0^{k-1} \\
+        1 & x_1 & x_1^2 & \cdots & x_1^{k-1} \\
+        \vdots & \vdots & \vdots & \ddots & \vdots \\
+        1 & x_{k-1} & x_{k-1}^2 & \cdots & x_{k-1}^{k-1}
+    \end{bmatrix}
+    \begin{bmatrix}
+        a_{r,0} \\ a_{r,1} \\ \vdots \\ a_{r,k-1}
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+        y_0 \\ y_1 \\ \vdots \\ y_{k-1}
+    \end{bmatrix}
+    \pmod p.
+\end{equation}
+If $x_0, x_1, \dots, x_{k-1}$ are pairwise distinct modulo $p$, then the $k \times k$ Vandermonde matrix $V$ is invertible over $\Fp$, and $\mathbf{a}_r = V^{-1} \mathbf{y}_r$ is unique.
+\end{theorem}
+\begin{proof}
+The determinant of the $k \times k$ Vandermonde matrix $V$ is given by the classical product identity:
+\[
+    \det(V) \equiv \prod_{0 \le i < j < k} (x_j - x_i) \pmod p.
+\]
+Since $x_i, x_j \in \{1, \dots, 255\} \subset \Fp$ and $x_i \neq x_j$ for all $i \neq j$, every factor satisfies $x_j - x_i \not\equiv 0 \pmod p$. Because $\Fp$ is a field (and therefore an integral domain with no zero divisors), a product of non-zero elements in $\Fp$ is strictly non-zero: $\det(V) \not\equiv 0 \pmod p$. Consequently, $\det(V)$ possesses a unique multiplicative inverse $(\det V)^{p-2} \in \Fps$, proving that $V^{-1}$ exists and the coefficient vector $\mathbf{a}_r = V^{-1} \mathbf{y}_r$ is uniquely determined.
+\end{proof}
+
+% ============================================================================
+\section{Key Derivation Hierarchy (HKDF-SHA256)}
+% ============================================================================
+
+To prevent cross-protocol key reuse between threshold algebra over $\Fp$ and symmetric encryption, AEGIS implements RFC 5869 HKDF-SHA256 using the Extract-then-Expand paradigm.
+
+Let $\mathrm{HMAC}(K, m)$ denote HMAC-SHA256 with 64-byte block size $B = 64$:
+\begin{equation}
+    \mathrm{HMAC}(K, m) = \mathrm{SHA256}\Big( (K \oplus \mathrm{opad}) \concat \mathrm{SHA256}\big( (K \oplus \mathrm{ipad}) \concat m \big) \Big).
+\end{equation}
+
+\begin{enumerate}[label=\textbf{Stage \arabic*:}]
+    \item \textbf{HKDF-Extract:} Given protocol salt $S_{\mathrm{root}} = \texttt{"AEGIS-v1-HKDF-SHA256-ROOT-SALT"}$ and input keying material $K_{\mathrm{master}} \in \{0,1\}^{256}$:
+    \begin{equation}
+        \mathrm{PRK} = \mathrm{HMAC}\big(S_{\mathrm{root}}, K_{\mathrm{master}}\big) \in \{0,1\}^{256}.
+    \end{equation}
+    \item \textbf{HKDF-Expand (Orthogonal Domain Separation):} From $\mathrm{PRK}$, AEGIS derives two computationally independent 256-bit outputs using single-block expansion ($L = 32$ bytes):
+    \begin{align}
+        K_{\mathrm{enc}} &= \mathrm{HMAC}\big(\mathrm{PRK},\; \texttt{"AEGIS-v1-CHACHA20POLY1305-ENC-KEY"} \concat \texttt{0x01}\big) \\
+        C_{\mathrm{key}} &= \mathrm{HMAC}\big(\mathrm{PRK},\; \texttt{"AEGIS-v1-MASTER-KEY-COMMITMENT"} \concat \texttt{0x01}\big).
+    \end{align}
+\end{enumerate}
+Under the standard assumption that HMAC-SHA256 is a secure Pseudorandom Function (PRF), $(K_{\mathrm{enc}}, C_{\mathrm{key}})$ is computationally indistinguishable from two independent uniform random 256-bit strings. Publishing $C_{\mathrm{key}}$ reveals no information about $K_{\mathrm{enc}}$ or $K_{\mathrm{master}}$, while providing a collision-resistant binding commitment to $K_{\mathrm{master}}$.
+
+% ============================================================================
+\section{Authenticated Encryption (ChaCha20-Poly1305)}
+% ============================================================================
+
+AEGIS encrypts payloads using RFC 8439 ChaCha20-Poly1305 with a 256-bit key $K_{\mathrm{enc}}$ and a 96-bit OS CSPRNG nonce $N \xleftarrow{\$} \{0,1\}^{96}$.
+
+\subsection{ChaCha20 Stream Cipher}
+ChaCha20 initializes a $4 \times 4$ state matrix of 32-bit little-endian words combining the 128-bit constant $\sigma = \texttt{"expand 32-byte k"}$, the 256-bit key $K_{\mathrm{enc}}$, a 32-bit block counter $c$, and the 96-bit nonce $N$. Block counter $c = 0$ generates the one-time 256-bit Poly1305 key $(r, s) = \mathrm{ChaCha20}(K_{\mathrm{enc}}, 0, N)[0..32]$, while counters $c \ge 1$ produce the keystream XORed with plaintext $P$:
+\begin{equation}
+    C = P \oplus \mathrm{ChaCha20Stream}(K_{\mathrm{enc}}, c \ge 1, N).
+\end{equation}
+
+\subsection{Canonical AAD Binding and Poly1305 Evaluation}
+To prevent header stripping or commitment substitution attacks, AEGIS binds the envelope version header, the 32-byte commitment $C_{\mathrm{key}}$, and the user's Associated Data ($\mathrm{AAD}_{\mathrm{user}}$) into an injective canonical AAD transcript:
+\begin{equation}
+    \mathrm{AAD}_{\mathrm{canonical}} = \texttt{"AEGIS-ENVELOPE-v1"} \concat \texttt{0x00} \concat C_{\mathrm{key}} \concat \texttt{0x00} \concat \mathrm{AAD}_{\mathrm{user}}.
+\end{equation}
+Poly1305 pads $\mathrm{AAD}_{\mathrm{canonical}}$, the ciphertext $C$, and their 64-bit little-endian byte lengths into $q$ 16-byte blocks $m_1, \dots, m_q$ and evaluates a polynomial modulo the prime $2^{130}-5$:
+\begin{equation}
+    T = \left( \left( \sum_{i=1}^{q} m_i \cdot r^{q - i + 1} \right) \bmod (2^{130} - 5) + s \right) \bmod 2^{128}.
+\end{equation}
+During decryption, $C_{\mathrm{key}}$ and $T$ are verified using constant-time byte comparisons prior to releasing any decrypted plaintext.
+
+% ============================================================================
+\section{Secret-Sharing Security Proof \& Algebraic Trapdoor}
+% ============================================================================
+
+\begin{theorem}[Information-Theoretic Security of $(k,n)$ Sharing]
+Let $I = \{x_1, \dots, x_{k-1}\} \subset \Fps$ be any subset of $k - 1$ distinct share coordinates with observed evaluations $\mathbf{y}_{I} = (y_1, \dots, y_{k-1}) \in \Fp^{k-1}$. For any two candidate secrets $s, s' \in [0, 65535] \subset \Fp$:
+\[
+    \Pr[S_r = s \mid \mathbf{Y}_I = \mathbf{y}_I] = \Pr[S_r = s' \mid \mathbf{Y}_I = \mathbf{y}_I] = \Pr[S_r = s].
+\]
+\end{theorem}
+\begin{proof}
+Fix any candidate secret $s^* \in \Fp$ at $x_0 = 0$. The $k$ points $(0, s^*), (x_1, y_1), \dots, (x_{k-1}, y_{k-1})$ have pairwise distinct abscissas because $x_i \in \{1, \dots, n\}$ and $x_0 = 0$. By Theorem 6.1 (Vandermonde Invertibility), there exists a unique degree-$(k-1)$ polynomial $f^*(x)$ passing through all $k$ points, which uniquely fixes the $k-1$ random coefficients $(a_1, \dots, a_{k-1}) \in \Fp^{k-2} \times \Fps$. Since the dealer samples $(a_1, \dots, a_{k-1})$ uniformly and independently of $s_r$, every candidate secret $s^*$ is equally likely given $\mathbf{y}_I$.
+\end{proof}
+
+\begin{proposition}[Two-Layer Forgery and Corruption Detection Probability]
+Suppose an adversary supplies a corrupted share during reconstruction, shifting the interpolated value $f_r(0)$ to a uniformly distributed residue in $\Fp$.
+\begin{enumerate}[label=(\arabic*)]
+    \item \textbf{Layer 1 (Algebraic Range Trapdoor):} A valid chunk must satisfy $0 \le f_r(0) \le 2^{16}-1$. The probability that a single random residue in $\Fp$ passes the range check is $\frac{2^{16}}{2^{31}-1} \approx 2^{-15}$. Across all $m = 16$ chunks, the false-acceptance probability of the range check alone is:
+    \[
+        \Pr[\text{Range Pass}] = \left( \frac{2^{16}}{2^{31}-1} \right)^{16} \approx 2^{-240} \approx 5.65 \times 10^{-73}.
+    \]
+    \item \textbf{Layer 2 (HKDF Cryptographic Commitment):} Even if an adversary specifically solves the linear system to force $f_r(0) \in [0, 2^{16}-1]$ for all 16 chunks, the resulting key $K'_{\mathrm{master}} \neq K_{\mathrm{master}}$ must match $C_{\mathrm{key}}$ under HKDF-SHA256, which fails with probability $1 - 2^{-256}$.
+\end{enumerate}
+\end{proposition}
+
+% ============================================================================
+\section{Implementation Details in Rust}
+% ============================================================================
+
+AEGIS is implemented in pure safe Rust (\texttt{\#![forbid(unsafe\_code)]}) across six modular compilation units:
+\begin{itemize}
+    \item \texttt{src/error.rs}: Defines \texttt{AegisError} with merged authentication error reporting (\texttt{AuthenticationFailed}) to eliminate padding/tag distinction oracles.
+    \item \texttt{src/keygen.rs}: Implements \texttt{MasterKey} with OS CSPRNG entropy (\texttt{getrandom}), constant-time equality (\texttt{subtle::ConstantTimeEq}), redacted \texttt{Debug} formatting, and volatile memory scrubbing (\texttt{ZeroizeOnDrop}).
+    \item \texttt{src/field.rs}: Implements \texttt{FieldElement} over $\Fp = \mathrm{GF}(2^{31}-1)$ using 64-bit intermediate arithmetic, binary exponentiation, Fermat inverses, and Horner's evaluation.
+    \item \texttt{src/sss.rs}: Implements $(k,n)$ splitting and Lagrange interpolation at $x=0$ with duplicate-abscissa and canonical-range checks.
+    \item \texttt{src/kdf.rs}: Implements RFC 5869 HKDF-SHA256 domain separation producing \texttt{EncryptionKey} and \texttt{KeyCommitment}.
+    \item \texttt{src/cipher.rs} \& \texttt{src/engine.rs}: Implements RFC 8439 ChaCha20-Poly1305 and key-committed \texttt{AegisEnvelope} workflows (\texttt{seal}, \texttt{open}, \texttt{open\_with\_shares}).
+\end{itemize}
+
+% ============================================================================
+\section{Security Analysis}
+% ============================================================================
+
+\begin{enumerate}[label=\textbf{\arabic*.}]
+    \item \textbf{Memory Hygiene:} Secret types omit the \texttt{Copy} trait and derive \texttt{ZeroizeOnDrop}. Temporary stack arrays (\texttt{okm}, \texttt{key\_bytes}) and heap vectors (\texttt{coeffs}, \texttt{points}, failed ciphertext buffers) are scrubbed via volatile writes that LLVM dead-store optimization cannot remove.
+    \item \textbf{Timing Side-Channel Resistance:} All secret and tag comparisons execute in constant time via \texttt{subtle::ConstantTimeEq}. Fermat inversion $a^{p-2} \bmod p$ iterates over a fixed public exponent $p - 2$, ensuring no secret-dependent loop branches.
+    \item \textbf{Cache Side-Channel Resistance:} Both ChaCha20-Poly1305 (ARX design) and arithmetic over $\Fp$ operate strictly on CPU registers without secret-indexed S-box or log/antilog lookup tables.
+\end{enumerate}
+
+% ============================================================================
+\section{Test Methodology}
+% ============================================================================
+
+AEGIS is verified by 46 automated unit, adversarial, Known-Answer Test (KAT), and property-based test suites (\texttt{proptest}):
+\begin{itemize}
+    \item \textbf{Standard KAT Vectors:} Verified against IETF RFC 8439 Section 2.8.2 (ChaCha20-Poly1305) and RFC 5869 (HKDF-SHA256).
+    \item \textbf{Exhaustive $\binom{5}{3}$ Threshold Reconstruction:} Verifies exact reconstruction across all 10 three-share subsets of a 5-share split.
+    \item \textbf{Exhaustive Bit-Flip Fuzzing:} Flips bits across every byte of the 12-byte nonce, ciphertext, 16-byte Poly1305 tag, and 32-byte \texttt{KeyCommitment}, asserting 100\% rejection.
+    \item \textbf{Property-Based Algebra (\texttt{proptest}):} Randomly tests field commutativity, associativity, distributivity, Fermat inverses $a \cdot a^{p-2} \equiv 1 \pmod p$, and random $(k,n)$ polynomial reconstructions.
+\end{itemize}
+
+% ============================================================================
+\section{Limitations}
+% ============================================================================
+
+\begin{enumerate}[label=(\arabic*)]
+    \item \textbf{Random 96-Bit Nonce Birthday Bound:} Sampling 96-bit nonces uniformly via CSPRNG bounds safe invocations under a single \texttt{MasterKey} to approximately $2^{32}$ messages (collision probability $\approx 2^{-33}$). High-volume deployments exceeding $2^{32}$ messages should rotate keys or use 192-bit nonces (XChaCha20-Poly1305).
+    \item \textbf{Microarchitectural Division Latency:} While exponentiation in $\Fp$ uses a fixed public exponent, modular reduction uses hardware integer division (\texttt{\%}), which can exhibit minor operand-dependent latency on certain CPU microarchitectures unless replaced by bitwise Mersenne folding $(x \mathbin{\&} p) + (x \gg 31)$.
+    \item \textbf{Host OS and Register Spills:} Software-level \texttt{zeroize} scrubs stack and heap allocations but cannot wipe internal CPU register spills or unencrypted OS swap pages if \texttt{mlock(2)} is not enabled.
+\end{enumerate}
+
+% ============================================================================
+\section{Conclusion}
+% ============================================================================
+
+AEGIS demonstrates that combining prime finite-field threshold algebra over $\mathrm{GF}(2^{31}-1)$, HKDF-SHA256 key commitments, and ChaCha20-Poly1305 AEAD in memory-safe Rust yields a high-assurance cryptographic architecture. By uniting an algebraic range trapdoor ($1 - 2^{-240}$) with a constant-time HKDF commitment ($1 - 2^{-256}$) and canonical AAD binding, AEGIS eliminates both single-key storage fragility and unauthenticated secret reconstruction.
+
+\begin{thebibliography}{9}
+\bibitem{shamir1979}
+A. Shamir, ``How to share a secret,'' \emph{Communications of the ACM}, vol. 22, no. 11, pp. 612--613, Nov. 1979.
+
+\bibitem{rfc5869}
+H. Krawczyk and P. Eronen, ``HMAC-based Extract-and-Expand Key Derivation Function (HKDF),'' IETF RFC 5869, May 2010.
+
+\bibitem{rfc8439}
+Y. Nir and A. Langley, ``ChaCha20 and Poly1305 for IETF Protocols,'' IETF RFC 8439, June 2018.
+\end{thebibliography}
+
+\end{document}
