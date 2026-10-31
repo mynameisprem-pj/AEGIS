@@ -85,7 +85,6 @@ AEGIS/
 └── docs/
     ├── SECURITY_ANALYSIS.md           # Formal 10-vector threat model & side-channel analysis
     ├── AEGIS_MATHEMATICAL_PAPER.tex   # Academic LaTeX specification & proofs
-    └── HACKATHON_SUBMISSION.md        # Devpost writeup & demo video voiceover script
 
 ```
 
@@ -167,8 +166,8 @@ cargo run -- verify \
 
 ## 6. Documentation & Formal Proofs
 
-* **[Formal Threat Model & Security Analysis](https://www.google.com/search?q=docs/SECURITY_ANALYSIS.md):** Detailed evaluation of 10 threat categories, mitigations, constant-time properties, and microarchitectural boundaries.
-* **[Mathematical Specification (LaTeX)](https://www.google.com/search?q=docs/AEGIS_MATHEMATICAL_PAPER.tex):** Complete proofs of 64-bit overflow freedom in $\mathbb{F}_{2^{31}-1}$, Fermat's Little Theorem inverses, Vandermonde matrix invertibility, Lagrange interpolation at $x=0$, and the $1 - 2^{-240}$ algebraic trapdoor.
+* **[Formal Threat Model & Security Analysis](https://github.com/mynameisprem-pj/AEGIS/blob/main/docs/SECURITY_ANALYSIS.md):** Detailed evaluation of 10 threat categories, mitigations, constant-time properties, and microarchitectural boundaries.
+* **[Mathematical Specification (LaTeX)](https://github.com/mynameisprem-pj/AEGIS/blob/main/docs/AEGIS_MATHEMATICAL_PAPER.tex):** Complete proofs of 64-bit overflow freedom in $\mathbb{F}_{2^{31}-1}$, Fermat's Little Theorem inverses, Vandermonde matrix invertibility, Lagrange interpolation at $x=0$, and the $1 - 2^{-240}$ algebraic trapdoor.
 
 ```
 
