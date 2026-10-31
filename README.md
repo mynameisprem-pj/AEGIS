@@ -4,6 +4,11 @@
 [![Memory Safety: #![forbid(unsafe_code)]](https://img.shields.io/badge/unsafe-forbidden-brightgreen.svg)](#security-guarantees)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+> **📄 Formal Documentation for Hackathon Judges:**
+> * **[Read the Compiled Mathematical Paper (PDF)](docs/AEGIS_MATHEMATICAL_PAPER.pdf)** — *14-section formal specification with proofs of 64-bit overflow freedom in $\mathbb{F}_{2^{31}-1}$, Fermat's Little Theorem inverses, Vandermonde matrix invertibility, and the $1 - 2^{-240}$ algebraic range trapdoor.*
+> * **[View LaTeX Source (`AEGIS_MATHEMATICAL_PAPER.tex`)](docs/AEGIS_MATHEMATICAL_PAPER.tex)** — *Raw academic LaTeX source code.*
+> * **[Read the Formal Threat Model & Security Analysis](docs/SECURITY_ANALYSIS.md)** — *Comprehensive evaluation across 10 attack vectors, constant-time guarantees, and side-channel boundaries.*
+
 **AEGIS** is a high-assurance, zero-trust cryptographic command-line application and library engineered in pure safe Rust (`#![forbid(unsafe_code)]`). It eliminates single-point-of-failure symmetric key storage and solves the **unauthenticated reconstruction problem** in threshold cryptography by binding **Prime Finite-Field Threshold Algebra ($\mathbb{F}_{2^{31}-1}$)**, **HKDF-SHA256 Key Commitments**, and **ChaCha20-Poly1305 Authenticated Encryption (AEAD)** into a unified architecture.
 
 ---
