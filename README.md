@@ -1,3 +1,31 @@
+`docs/AEGIS_MATHEMATICAL_PAPER.tex` (27 KB) is saved and ready. *(Tip: If you want to export a compiled `.pdf` of the paper to attach to your Devpost submission or GitHub repo, you can upload `docs/AEGIS_MATHEMATICAL_PAPER.tex` directly into Overleaf for instant one-click PDF compilation).*
+
+Now let's complete **Phase 12 — Final Hackathon Preparation**. To keep this clean and actionable, we will create:
+
+1. **`README.md`:** A flagship GitHub repository README featuring an ASCII system architecture diagram, mathematical summary, installation & reproducible test commands, CLI usage examples, and explicit separation of established primitives vs. AEGIS's original engineering contributions.
+2. **`scripts/demo.sh`:** An executable, self-contained terminal demonstration script that walks through key generation, $(3,5)$ splitting, ChaCha20-Poly1305 encryption with AAD, zero-exposure threshold decryption, and adversarial tamper rejection (for your live hackathon video recording).
+3. **`docs/HACKATHON_SUBMISSION.md`:** Your complete Devpost submission writeup and a minute-by-minute Demo Video Voiceover Script aligned to the 4 judging criteria (**Cryptanalysis**, **Uniqueness**, **Attack Surface**, and **Mathematical Presentation**).
+
+---
+
+## PHASE 12 — Final Hackathon Packaging (`README.md`, `scripts/demo.sh`, `docs/HACKATHON_SUBMISSION.md`)
+
+### 1. Exact Terminal Commands
+
+Create the `scripts` directory and the files in your `/workspaces/AEGIS` terminal:
+
+```bash
+mkdir -p scripts docs
+touch README.md scripts/demo.sh docs/HACKATHON_SUBMISSION.md
+chmod +x scripts/demo.sh
+
+```
+
+### 2. File 1: `README.md`
+
+Write the following documentation into `/workspaces/AEGIS/README.md`:
+
+```markdown
 # AEGIS — Adaptive Encryption and Guarded Integrated Secret-Key System
 
 [![Language: Rust](https://img.shields.io/badge/Language-Rust%202021-orange.svg)](https://www.rust-lang.org/)
@@ -57,7 +85,14 @@
 |  Out  : AegisEnvelope (C_key||N||C||T) |
 +----------------------------------------+
 
-3. Repository StructurePlaintextAEGIS/
+```
+
+---
+
+## 3. Repository Structure
+
+```text
+AEGIS/
 ├── Cargo.toml                         # Dependencies & release security profile (panic = "abort")
 ├── Cargo.lock                         # Deterministic dependency lockfile
 ├── README.md                          # Project overview, architecture & CLI guide
@@ -79,7 +114,21 @@
     ├── SECURITY_ANALYSIS.md           # Formal 10-vector threat model & side-channel analysis
     ├── AEGIS_MATHEMATICAL_PAPER.tex   # Academic LaTeX specification & proofs
     └── HACKATHON_SUBMISSION.md        # Devpost writeup & demo video voiceover script
-4. Build, Lint & Reproducible Test CommandsPrerequisitesRust 1.75+ (tested on rustc 1.99.1) and Cargo.Verification SuiteBash# 1. Check formatting
+
+```
+
+---
+
+## 4. Build, Lint & Reproducible Test Commands
+
+### Prerequisites
+
+* Rust `1.75+` (tested on `rustc 1.99.1`) and Cargo.
+
+### Verification Suite
+
+```bash
+# 1. Check formatting
 cargo fmt --check
 
 # 2. Run static analysis with zero warnings permitted
@@ -93,20 +142,61 @@ cargo run -- selftest
 
 # 5. Execute the end-to-end terminal demonstration script
 ./scripts/demo.sh
-5. CLI Usage Guide1. Generate a Master Key & Immediately Split into $(k=3, n=5)$ SharesBashcargo run -- keygen -k 3 -n 5
-(Add --suppress-key to operate in Zero-Exposure Mode so the raw Master Key is never printed to the screen).2. Encrypt a Sensitive Message with Associated Data (AAD)Bashcargo run -- encrypt \
+
+```
+
+---
+
+## 5. CLI Usage Guide
+
+### 1. Generate a Master Key & Immediately Split into $(k=3, n=5)$ Shares
+
+```bash
+cargo run -- keygen -k 3 -n 5
+
+```
+
+*(Add `--suppress-key` to operate in Zero-Exposure Mode so the raw Master Key is never printed to the screen).*
+
+### 2. Encrypt a Sensitive Message with Associated Data (AAD)
+
+```bash
+cargo run -- encrypt \
   --key <64_CHAR_MASTER_KEY_HEX> \
   --message "Classified launch authorization code: OMEGA-7" \
   --aad "vault:sector-9"
-3. Zero-Exposure Threshold Decryption (Directly from Any 3 Shares)Bashcargo run -- decrypt \
+
+```
+
+### 3. Zero-Exposure Threshold Decryption (Directly from Any 3 Shares)
+
+```bash
+cargo run -- decrypt \
   --envelope "AEGIS-ENVELOPE-v1:..." \
   --share "AEGIS-SHARE-v1:3:1:..." \
   --share "AEGIS-SHARE-v1:3:3:..." \
   --share "AEGIS-SHARE-v1:3:5:..." \
   --aad "vault:sector-9"
-4. Verify Shares Against a Public Key Commitment (Without Exposing the Key)Bashcargo run -- verify \
+
+```
+
+### 4. Verify Shares Against a Public Key Commitment (Without Exposing the Key)
+
+```bash
+cargo run -- verify \
   --commitment <64_CHAR_COMMITMENT_HEX> \
   --share "AEGIS-SHARE-v1:3:2:..." \
   --share "AEGIS-SHARE-v1:3:4:..." \
   --share "AEGIS-SHARE-v1:3:5:..."
-6. Documentation & Formal ProofsFormal Threat Model & Security Analysis: Detailed evaluation of 10 threat categories, mitigations, constant-time properties, and microarchitectural boundaries.Mathematical Specification (LaTeX): Complete proofs of 64-bit overflow freedom in $\mathbb{F}_{2^{31}-1}$, Fermat's Little Theorem inverses, Vandermonde matrix invertibility, Lagrange interpolation at $x=0$, and the $1 - 2^{-240}$ algebraic trapdoor.
+
+```
+
+---
+
+## 6. Documentation & Formal Proofs
+
+* **[Formal Threat Model & Security Analysis](https://www.google.com/search?q=docs/SECURITY_ANALYSIS.md):** Detailed evaluation of 10 threat categories, mitigations, constant-time properties, and microarchitectural boundaries.
+* **[Mathematical Specification (LaTeX)](https://www.google.com/search?q=docs/AEGIS_MATHEMATICAL_PAPER.tex):** Complete proofs of 64-bit overflow freedom in $\mathbb{F}_{2^{31}-1}$, Fermat's Little Theorem inverses, Vandermonde matrix invertibility, Lagrange interpolation at $x=0$, and the $1 - 2^{-240}$ algebraic trapdoor.
+
+```
+
